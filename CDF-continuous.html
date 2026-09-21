@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Interactive PDF and CDF Explorer</title>
+  <style>
+    :root{
+      --bg:#f7f7f9;
+      --panel:#ffffff;
+      --text:#1f2937;
+      --muted:#6b7280;
+      --border:#d1d5db;
+      --grid:#e5e7eb;
+      --navy:#1e3a8a;
+      --sky:#7dd3fc;
+      --green:#15803d;
+      --red:#dc2626;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Arial, Helvetica, sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+    .wrap{
+      max-width:1200px;
+      margin:0 auto;
+      padding:24px;
+    }
+    h1{
+      margin:0 0 20px;
+      font-size:30px;
+      font-weight:700;
+    }
+    .row{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:20px;
+      align-items:start;
+    }
+    .panel{
+      background:var(--panel);
+      border:1px solid var(--border);
+      border-radius:12px;
+      padding:16px;
+      box-shadow:0 1px 3px rgba(0,0,0,0.06);
+    }
+    .plot-title{
+      font-size:21px;
+      font-weight:700;
+      text-align:center;
+      margin:0 0 10px;
+    }
+    svg{
+      width:100%;
+      height:auto;
+      display:block;
+      background:white;
+      border-radius:8px;
+      cursor:crosshair;
+    }
+    .footer-text{
+      margin-top:20px;
+      padding:12px 14px;
+      background:#f9fafb;
+      border:1px solid var(--border);
+      border-radius:10px;
+      font-family:"Courier New", Courier, monospace;
+      white-space:pre-wrap;
+    }
+    .note{
+      color:var(--muted);
+      font-size:13px;
+      margin-top:8px;
+      text-align:center;
+    }
+    @media (max-width: 900px){
+      .row{grid-template-columns:1fr;}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>CDF Demo - Continuous Distribution (Normal)</h1>
+
+    <div class="row">
+      <div class="panel">
+        <div class="plot-title">Probability Density Function (PDF)</div>
+        <svg id="pdfChart" viewBox="0 0 560 400" aria-label="Normal PDF chart"></svg>
+        <div class="note">Click anywhere on the plot to choose x.</div>
+      </div>
+
+      <div class="panel">
+        <div class="plot-title">Cumulative Distribution Function (CDF)</div>
+        <svg id="cdfChart" viewBox="0 0 560 400" aria-label="Normal CDF chart"></svg>
+        <div class="note">Click anywhere on the plot to choose x.</div>
+      </div>
+    </div>
+
+    <div class="footer-text" id="xInfo"></div>
+  </div>
+
+  <script>
+    const pdfChart = document.getElementById("pdfChart");
+    const cdfChart = document.getElementById("cdfChart");
+    const xInfo = document.getElementById("xInfo");
+
+    let currentX = 0;
+
+    function erf(x) {
+      const sign = x >= 0 ? 1 : -1;
+      x = Math.abs(x);
+
+      const a1 = 0.254829592;
+      const a2 = -0.284496736;
+      const a3 = 1.421413741;
+      const a4 = -1.453152027;
+      const a5 = 1.061405429;
+      const p = 0.3275911;
+
+      const t = 1 / (1 + p * x);
+      const y = 1 - (((((a5 * t + a4) * t) + a3) * t + a2) * t + a1) * t * Math.exp(-x * x);
+      return sign * y;
+    }
+
+    function dnorm(x, mean = 0, sd = 1) {
+      const z = (x - mean) / sd;
+      return Math.exp(-0.5 * z * z) / (sd * Math.sqrt(2 * Math.PI));
+    }
+
+    function pnorm(x, mean = 0, sd = 1) {
+      return 0.5 * (1 + erf((x - mean) / (sd * Math.sqrt(2))));
+    }
+
+    function createSVGElement(tag, attrs = {}, text = null) {
+      const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+      for (const [key, value] of Object.entries(attrs)) {
+        el.setAttribute(key, value);
+      }
+      if (text !== null) el.textContent = text;
+      return el;
+    }
+
+    function drawAxes(svg, W, H, margin, xMin, xMax, yMin, yMax, yLabel, xLabel = "x") {
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+      const innerW = W - margin.left - margin.right;
+      const innerH = H - margin.top - margin.bottom;
+
+      const xScale = x => margin.left + ((x - xMin) / (xMax - xMin)) * innerW;
+      const yScale = y => margin.top + innerH - ((y - yMin) / (yMax - yMin)) * innerH;
+      const xInvert = px => xMin + ((px - margin.left) / innerW) * (xMax - xMin);
+
+      svg.appendChild(createSVGElement("rect", {
+        x: 0, y: 0, width: W, height: H, fill: "white"
+      }));
+
+      const xTicks = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5];
+      const yTicks = [];
+      const steps = 5;
+      for (let i = 0; i <= steps; i++) {
+        yTicks.push(yMin + (yMax - yMin) * i / steps);
+      }
+
+      yTicks.forEach(v => {
+        const y = yScale(v);
+        svg.appendChild(createSVGElement("line", {
+          x1: margin.left, y1: y, x2: W - margin.right, y2: y,
+          stroke: "#e5e7eb", "stroke-width": 1
+        }));
+        svg.appendChild(createSVGElement("text", {
+          x: margin.left - 10, y: y + 4, "text-anchor": "end",
+          "font-size": 12, fill: "#374151"
+        }, v.toFixed(2).replace(/\.00$/, "")));
+      });
+
+      xTicks.forEach(v => {
+        const x = xScale(v);
+        svg.appendChild(createSVGElement("line", {
+          x1: x, y1: margin.top, x2: x, y2: H - margin.bottom,
+          stroke: "#f3f4f6", "stroke-width": 1
+        }));
+        svg.appendChild(createSVGElement("line", {
+          x1: x, y1: H - margin.bottom, x2: x, y2: H - margin.bottom + 6,
+          stroke: "#111827", "stroke-width": 1
+        }));
+        svg.appendChild(createSVGElement("text", {
+          x: x, y: H - margin.bottom + 22, "text-anchor": "middle",
+          "font-size": 12, fill: "#374151"
+        }, String(v)));
+      });
+
+      svg.appendChild(createSVGElement("line", {
+        x1: margin.left, y1: H - margin.bottom,
+        x2: W - margin.right, y2: H - margin.bottom,
+        stroke: "#111827", "stroke-width": 1.5
+      }));
+      svg.appendChild(createSVGElement("line", {
+        x1: margin.left, y1: margin.top,
+        x2: margin.left, y2: H - margin.bottom,
+        stroke: "#111827", "stroke-width": 1.5
+      }));
+
+      svg.appendChild(createSVGElement("text", {
+        x: W / 2, y: H - 12, "text-anchor": "middle",
+        "font-size": 16, fill: "#111827", "font-weight": "600"
+      }, xLabel));
+
+      svg.appendChild(createSVGElement("text", {
+        x: 22, y: H / 2,
+        transform: `rotate(-90 22 ${H / 2})`,
+        "text-anchor": "middle", "font-size": 16,
+        fill: "#111827", "font-weight": "600"
+      }, yLabel));
+
+      return { xScale, yScale, xInvert };
+    }
+
+    function drawPDF() {
+      const W = 560, H = 400;
+      const margin = { top: 20, right: 20, bottom: 55, left: 65 };
+      const xMin = -5, xMax = 5, yMin = 0, yMax = 0.45;
+      const { xScale, yScale, xInvert } = drawAxes(
+        pdfChart, W, H, margin, xMin, xMax, yMin, yMax, "Density", "t"
+      );
+
+      const shadeLeft = xMin;
+      const shadeRight = Math.max(xMin, Math.min(currentX, xMax));
+      if (shadeRight > shadeLeft) {
+        let d = `M ${xScale(shadeLeft)} ${yScale(0)} `;
+        for (let i = 0; i <= 300; i++) {
+          const x = shadeLeft + (shadeRight - shadeLeft) * i / 300;
+          d += `L ${xScale(x)} ${yScale(dnorm(x))} `;
+        }
+        d += `L ${xScale(shadeRight)} ${yScale(0)} Z`;
+        pdfChart.appendChild(createSVGElement("path", {
+          d: d, fill: "#7dd3fc", opacity: 0.85
+        }));
+      }
+
+      let path = "";
+      for (let i = 0; i <= 500; i++) {
+        const x = xMin + (xMax - xMin) * i / 500;
+        const y = dnorm(x);
+        path += (i === 0 ? "M " : "L ") + xScale(x) + " " + yScale(y) + " ";
+      }
+      pdfChart.appendChild(createSVGElement("path", {
+        d: path, fill: "none", stroke: "#1e3a8a", "stroke-width": 2.5
+      }));
+
+      const xLine = xScale(Math.max(xMin, Math.min(currentX, xMax)));
+      pdfChart.appendChild(createSVGElement("line", {
+        x1: xLine, y1: margin.top,
+        x2: xLine, y2: H - margin.bottom,
+        stroke: "#dc2626", "stroke-width": 2, "stroke-dasharray": "8 7"
+      }));
+
+      pdfChart.appendChild(createSVGElement("text", {
+        x: xLine,
+        y: H - margin.bottom + 20,
+        "text-anchor": "middle",
+        "font-size": 16,
+        "font-weight": "700",
+        fill: "#dc2626"
+      }, "x"));
+
+      pdfChart.onclick = (evt) => {
+        const pt = pdfChart.createSVGPoint();
+        pt.x = evt.clientX;
+        pt.y = evt.clientY;
+        const local = pt.matrixTransform(pdfChart.getScreenCTM().inverse());
+        if (local.x >= margin.left && local.x <= W - margin.right) {
+          currentX = Math.max(xMin, Math.min(xInvert(local.x), xMax));
+          renderAll();
+        }
+      };
+    }
+
+    function drawCDF() {
+      const W = 560, H = 400;
+      const margin = { top: 20, right: 20, bottom: 55, left: 65 };
+      const xMin = -5, xMax = 5, yMin = 0, yMax = 1;
+      const { xScale, yScale, xInvert } = drawAxes(
+        cdfChart, W, H, margin, xMin, xMax, yMin, yMax, "Probability", "x"
+      );
+
+      let path = "";
+      for (let i = 0; i <= 500; i++) {
+        const x = xMin + (xMax - xMin) * i / 500;
+        const y = pnorm(x);
+        path += (i === 0 ? "M " : "L ") + xScale(x) + " " + yScale(y) + " ";
+      }
+      cdfChart.appendChild(createSVGElement("path", {
+        d: path, fill: "none", stroke: "#15803d", "stroke-width": 2.5
+      }));
+
+      cdfChart.appendChild(createSVGElement("circle", {
+        cx: xScale(currentX), cy: yScale(pnorm(currentX)),
+        r: 5, fill: "#dc2626"
+      }));
+
+      cdfChart.onclick = (evt) => {
+        const pt = cdfChart.createSVGPoint();
+        pt.x = evt.clientX;
+        pt.y = evt.clientY;
+        const local = pt.matrixTransform(cdfChart.getScreenCTM().inverse());
+        if (local.x >= margin.left && local.x <= W - margin.right) {
+          currentX = Math.max(xMin, Math.min(xInvert(local.x), xMax));
+          renderAll();
+        }
+      };
+    }
+
+    function updateInfo() {
+      xInfo.textContent =
+        `Current x value: ${currentX.toFixed(2)}\n` +
+        `CDF value: ${pnorm(currentX).toFixed(4)}`;
+    }
+
+    function renderAll() {
+      drawPDF();
+      drawCDF();
+      updateInfo();
+    }
+
+    renderAll();
+  </script>
+</body>
+</html>
